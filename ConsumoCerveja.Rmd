@@ -1,0 +1,220 @@
+---
+title: "Consumo de cerveja"
+author: "Ben-Hur Santana de Lima"
+date: "19/04/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+
+## Carregando o banco de dados
+```{r}
+df <- read.csv2("consumo_cerveja.csv")
+```
+
+
+## Pacotes utilizados
+```{r}
+library(dplyr) 
+library(ggplot2) 
+library(lubridate)
+library(kableExtra)
+library(dgof)
+```
+
+## Renomeando variaveis
+Como as variáveis do banco de dados estão nomeadas com " espaço " o R converte a leitura e ficou "estranho" a parte em que continha a escala das variávies, então decidi renomea-los para ficar melhor fazer os códigos. Mas lembrando que Temperatura Média, mínima e máxima está em graus Celsius, a Precipitação está em mm, e o consumo de cerveja está em litros.
+```{r}
+df<-df%>%
+    dplyr::rename(Temperatura.Media = Temperatura.Media..C.,Temperatura.Minima = Temperatura.Minima..C.,Temperatura.Maxima = Temperatura.Maxima..C., Precipitacao=Precipitacao..mm., Consumo.de.cerveja=Consumo.de.cerveja..litros.)
+  
+
+```
+
+```{r}
+df%>%
+  sample_n(5)
+```
+A principio não ia fazer uma analise descritiva para as Temperaturas, pois elas já estavam com as métricas estatisticas Media, Minima, e Maxima. Porém os dados nos fornecem essas métricas diariamente, uma tabela mostrando do ano todo nos daria outra visão. Como por exemplo, podemos ver que há 1 NA em cada uma delas. 
+
+Note também que a variável Data está no formato de de character, quero deixo-lo no formato de Date.
+
+```{r}
+a<-summary(df)
+ kableExtra::kable(a) %>%
+  kable_styling("striped")
+```
+
+
+Para resolver o problema dos NA nas colunas de temperatura, podemos substitui-las pelas suas respectivas medianas. O dplyr possui uma função chamada coalesce que serve exatamente para isto.
+
+```{r}
+df$Temperatura.Media <- coalesce(df$Temperatura.Media, median(df$Temperatura.Media, na.rm = T))
+df$Temperatura.Minima <- coalesce(df$Temperatura.Minima, median(df$Temperatura.Minima, na.rm = T))
+df$Temperatura.Maxima <- coalesce(df$Temperatura.Maxima, median(df$Temperatura.Maxima, na.rm = T))
+
+```
+
+No caso para mudar o tipo de variavel de data utilizaremos o comando dmy() (dia, mês, ano), do pacote lubridate. Se o formato da data estivesse mês/dia/ano podiamos usar o mdy(), e assim por diante.
+
+```{r}
+df$Data = dmy(paste(df$Data))
+```
+
+
+Podemos analisar a data com a variavel final de semana, para estudar se existe mais consumo de cerveja durante os dias de semana ou finais de semana(0 para dias de semana,1 para finais de semana). No gráfico abaixo é possivel perceber que finais de semana são mais propensos ao alto consumo de alcool.
+````{r}
+par(mfrow = c(1,2))
+
+df %>%
+  ggplot(aes( Data,Consumo.de.cerveja, color= factor(Final.de.Semana))) +
+  geom_point(aes(color=factor(Final.de.Semana))) +
+  geom_smooth(method = "lm", se=F) +
+  labs(title = "Consumo de cerveja durante 2019")
+
+df %>%
+  ggplot(aes( Data,Consumo.de.cerveja, color= factor(Final.de.Semana))) +
+  geom_point() +
+  facet_wrap(vars(color=factor(Final.de.Semana))) +
+  geom_smooth(method = "lm", se=F) +
+  labs(title = "Consumo de cerveja - Dias de semana X Finais de semana")
+  
+
+```
+
+No boxplot abaixo podemos confirmar o que foi dito anteriormente, finais de semana superam os dias de semana em questão de consumo de cerveja.
+
+```{r}
+df %>%
+  ggplot(aes(factor(Final.de.Semana),Consumo.de.cerveja,color= factor(Final.de.Semana) )) +
+  geom_boxplot()+
+  labs(title = "Boxplot - Consumo de cerveja X Final de semana")
+
+```
+
+
+
+Vimos no summary algumas métricas estatisticas, pensei criar uma nova variável com temperaturas categoricas e será baseada na coluna Temperatura.Media. Essa nova variável se chamará Temperatura e terá três categorias: Baixa, Media, Alta. Se a temperatura média estiver abaixo de 20 graus eu digo que ela está baixa, se estiver entre 20 e 23 graus está na média e se estiver maior que 23 graus está alta(os valores podem ser discutidos).
+
+```{r}
+df <- df %>% 
+  dplyr::mutate(Temperatura = dplyr::case_when(Temperatura.Media <= "20.0" ~ "Baixa",
+                                            Temperatura.Media >= "20.1" & Temperatura.Media <= "23.0" ~ "Media",
+                                            Temperatura.Media >= "23.1" ~ "Alta"
+                                            ))
+
+```
+
+
+Agora podemos ter uma média do consumo de cerveja de acordo com a temperatura, como por exemplo é mais propcio consumir mais quando a temperatura está alta, em geral no começo e fim de ano que são as épocas mais quentes. No meio do ano há casos com muito consumo mas a grande concentração está abaixo dos 25.000 litros. 
+
+```{r}
+df %>%
+  ggplot(aes( Data,Consumo.de.cerveja, color= factor(Temperatura.))) +
+  geom_point(aes(color=factor(Temperatura))) 
+  
+
+```
+
+## Regressão Linear
+
+
+
+Pensei em fazer um modelo de regressão para prever o consumo médio de cerveja de acordo com as temperaturas: $Consumo$ ~ $Temperatura.Média + Temperatura.Minima + Temperatura.Maxima$.
+
+Abaixo temos o histograma de nossa variável resposta e a densidade de sua função, ela apararenta ter uma distribuição normal mas podemos fazer testes para confirmar isso.
+
+```{r}
+df %>%
+  ggplot(aes(Consumo.de.cerveja)) +
+  geom_histogram(bins = 30, fill = "lightblue") +
+  labs(title = "Histograma Consumo de cerveja")
+
+df %>%
+  ggplot(aes(Consumo.de.cerveja)) +
+  geom_density() +
+  labs(title = "Linha de densidade do Consumo de cerveja")
+  
+
+```
+
+A hipotese nula do teste de shapiro-wilk é que a população possui distribuição normal. Portanto, se o p-valor for < 0.05 rejeitamos a hipotese nula, como nosso p-value = 0.005 então nossa variável não possui distribuição normal.
+
+```{r}
+shapiro.test(df$Consumo.de.cerveja)
+
+```
+Se fizermos um gráfico de dispersão das temperaturas em relação ao consumo de cerveja podemos observar um possivel outlier no gráfico da temperatura média, os pontos da temperatura mínima são bem distribuidos e o grafico da temperatura máxima apresenta uma tendência de crescimento.
+
+
+
+```{r}
+df %>%
+  ggplot(aes( Temperatura.Media,Consumo.de.cerveja)) +
+  geom_point() +
+  geom_smooth(method = "lm", se=F)
+
+df %>%
+  ggplot(aes( Temperatura.Minima,Consumo.de.cerveja)) +
+  geom_point() +
+  geom_smooth(method = "lm", se=F)
+
+df %>%
+  ggplot(aes( Temperatura.Maxima,Consumo.de.cerveja)) +
+  geom_point() +
+  geom_smooth(method = "lm", se=F)
+
+```
+
+
+Ao fazer uma correlação das temperaturas com o consumo de cerveja vemos númericamente o que o gráfico de dispersão acima nos mostra.
+
+```{r}
+cor(df$Consumo.de.cerveja, df$Temperatura.Media)
+cor(df$Consumo.de.cerveja, df$Temperatura.Minima)
+cor(df$Consumo.de.cerveja, df$Temperatura.Maxima)
+
+```
+
+Na coluna Estime, no summary abaixo, nos mostra quanto quanto cada variável agrega para o consumo de cerveja. Por exemplo,a cada unidade da temperatura media temos um acrescimo de 192.20 litros de consumo, já a temperatura mínima contribui negativamente com -209.70 litros de consumo, a cada unidade, e a cada unidade da temperatura máxima se obtem mais 609.93 litros.(Seria muito bom fazer essa previsão no shiny)
+
+A última coluna Pr(>|t|) representa o nível de significância, se o valor for menor que 0.05, a única variável não relevante para o modelo é a temperatura média. Provavelmente por causa do possivel outlier que identificamos no gráfico de dispersão.
+
+Além disso o summary nos mostra o coeficiente de determinação, o $R^2$. Ele indica quanto o modelo está explicando nossa variável resposta(Consumo de cerveja), no nosso caso $R^2 = 41.54\%$.
+```{r}
+ajuste = lm( df$Consumo.de.cerveja ~ df$Temperatura.Media + df$Temperatura.Minima + df$Temperatura.Maxima, data = df)
+summary(ajuste)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
