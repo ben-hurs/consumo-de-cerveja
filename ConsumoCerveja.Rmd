@@ -1,7 +1,7 @@
 ---
 title: "Consumo de cerveja"
 author: "Ben-Hur Santana de Lima"
-date: "19/04/2021"
+date: "21/04/2021"
 output: html_document
 ---
 
@@ -19,6 +19,7 @@ knitr::opts_chunk$set(
 ```{r}
 df <- read.csv2("consumo_cerveja.csv")
 ```
+
 
 
 ## Pacotes utilizados
@@ -43,6 +44,9 @@ df<-df%>%
 df%>%
   sample_n(5)
 ```
+
+## Análise Descritiva
+
 A principio não ia fazer uma analise descritiva para as Temperaturas, pois elas já estavam com as métricas estatisticas Media, Minima, e Maxima. Porém os dados nos fornecem essas métricas diariamente, uma tabela mostrando do ano todo nos daria outra visão. Como por exemplo, podemos ver que há 1 NA em cada uma delas. 
 
 Note também que a variável Data está no formato de de character, quero deixo-lo no formato de Date.
@@ -69,6 +73,8 @@ No caso para mudar o tipo de variavel de data utilizaremos o comando dmy() (dia,
 df$Data = dmy(paste(df$Data))
 ```
 
+
+## Análise Exploratória 
 
 Podemos analisar a data com a variavel final de semana, para estudar se existe mais consumo de cerveja durante os dias de semana ou finais de semana(0 para dias de semana,1 para finais de semana). No gráfico abaixo é possivel perceber que finais de semana são mais propensos ao alto consumo de alcool.
 ````{r}
@@ -190,25 +196,134 @@ A última coluna Pr(>|t|) representa o nível de significância, se o valor for 
 
 Além disso o summary nos mostra o coeficiente de determinação, o $R^2$. Ele indica quanto o modelo está explicando nossa variável resposta(Consumo de cerveja), no nosso caso $R^2 = 41.54\%$.
 ```{r}
-ajuste = lm( df$Consumo.de.cerveja ~ df$Temperatura.Media + df$Temperatura.Minima + df$Temperatura.Maxima, data = df)
-summary(ajuste)
+model = lm( df$Consumo.de.cerveja ~ df$Temperatura.Media + df$Temperatura.Minima + df$Temperatura.Maxima, data = df)
+summary(model)
+
+```
+
+### Análise de Diagnostico do modelo
+
+A análise de diagnostico é importante para sabermos se nosso modelo é válido, nele estamos basicamente estudando os resíduos do modelo, como por exemplo se eles são independentes, se são homocedasticos(possuem a variância constante) e se possuem distribuição normal.
+
+As linhas de código abaixo servem para encontrar a matriz do modelo ajustado, o estimador dessa matriz e os residuos studentizados. Assim como vão nos auxiliar a fazer alguns gráficos ao decorrer da analise.
+
+```{r}
+fit.model <- model #modelo ajustado
+X <- model.matrix(fit.model) #matriz do modelo ajustado
+n <- nrow(X) #no de observações
+p <- ncol(X) #no de parâmetros
+H <- X%*%solve(t(X)%*%X)%*%t(X) #matriz Hat
+h <- diag(H) #diagonal da matriz Hat (hii, medida de alavanca)
+rs = rstudent(model) # residuo studentizado
+
+```
+
+O primeiro gráfico que falaremos é o da distância de cook, ele nos ajuda a verificar os pontos de alavancagem, que causam aleração na inclinação da reta do modelo. Nosso gráfico apresenta apenas um, provavelmente aquele que identificamos na analise exploratória.
+
+```{r}
+h <- data.frame(h = h, i = c(1:(length(h))))
+plot <- ggplot(h, aes(i, h)) + geom_point() + xlab("Índice") + ylab("Medida h") + theme_bw() +
+   geom_abline(slope = 0, intercept = 2*p/n, col = "blue", type = "dashed") 
+  plot + labs(title = "Distância de cook")
+
 
 ```
 
 
+Falaremos agora sobre resíduos studentizados pelo índice, que serve para verificar se os erros são independentes entre si. Vemos que no gráfico os pontos estão bem homogeneos entre o intervalo [-2,2], com alguns pontos discrepantes aos que estão fora deste intervalo, então temos informações para não rejeitar a hipotese de independencia.
 
 
+```{r}
+rs <- data.frame(rs = rs, i = c(1:length(rs)))
+plot <- ggplot(rs, aes(i, rs)) + geom_point() + theme_bw() + geom_hline(yintercept = -2, col = "blue")+
+    geom_hline(yintercept = 2, col = "blue")
+plot + labs(title = "Residuos studentizados X Índice")
+
+```
+
+Para testar a homocedasticidade(se os residuos possuem variância constante) vamos ver o gráfico dos resíduos studentizados x valores ajustados, como nosso gráfico está com os pontos bem distribuidos temos informações para não rejeitar a hipotese de que os residuos são homocedasticos. Geralmente rejeitamos este tipo de hipotese caso os dados estivessem muito concentrados em uma parte especifica, ou formato de cone, etc.
+
+```{r}
+homocedasticidade <- data.frame(rs = rs$rs, fit = fit.model$fitted)
+ggplot(homocedasticidade, aes(fit, rs)) + geom_point() + geom_hline(yintercept = -2, col = "blue") + geom_hline(yintercept = 2, col = "blue") + xlab("Valores Ajustados") + ylab("Resíduo Studentizado")
+
+```
 
 
+Como última análise dos resíduos vamos observar a normalidade atráves de um gráfico de envelope, onde onde ele mostra um qqplot com intervalos de confiança. Pelo gráfico se todos os pontos estivessem dentro deste intervalo de confiança teriamos motivos parar não rejeitar a hipotese de normalidade, mas como não é o nosso caso não podemos.
+
+```{r}
+qqnormb <- function(X, Y, Z){
+li <- qqnorm(X, plot.it = F)
+ x <- qqnorm(Y, plot.it = F)
+ ls <- qqnorm(Z, plot.it = F)
+ 
+ data <- data.frame(lix = li$x, liy = li$y, xx= x$x, xy = x$y ,lsx = ls$x, lsy = ls$y)
+ 
+require(ggplot2)
+ p <- ggplot(data, aes(lix,liy, xx,xy, lsx,lsy)) + geom_ribbon(aes(ymin = liy, ymax = lsy), alpha = 0.3, col = "grey") + geom_point(aes(xx, xy))
+ return(p)
+}
 
 
+par(mfrow=c(1,1))
+X <- model.matrix(fit.model)
+n <- nrow(X)
+p <- ncol(X)
+H <- X%*%solve(t(X)%*%X)%*%t(X)
+h <- diag(H)
+si <- lm.influence(fit.model)$sigma
+r <- resid(fit.model)
+tsi <- r/(si*sqrt(1-h))
+#
+ident <- diag(n)
+epsilon <- matrix(0,n,100)
+e <- matrix(0,n,100)
+e1 <- numeric(n)
+e2 <- numeric(n)
+#
+for(i in 1:100){
+ epsilon[,i] <- rnorm(n,0,1)
+ e[,i] <- (ident - H)%*%epsilon[,i]
+ u <- diag(ident - H)
+ e[,i] <- e[,i]/sqrt(u)
+ e[,i] <- sort(e[,i]) }
+#
+for(i in 1:n){
+ eo <- sort(e[i,])
+ e1[i] <- (eo[2]+eo[3])/2
+ e2[i] <- (eo[97]+eo[98])/2 }
+#
+med <- apply(e,1,mean)
+faixa <- range(tsi,e1,e2)
 
 
+```
+
+```{r}
+qqnormb(e1, tsi, e2) + theme_bw() + xlab("Percentil da Normal(0,1)") + ylab("Resíduo Studentizado") + geom_abline(slope = 1, intercept = 0, col = "blue")
+
+```
 
 
+Mas podemos fazer um teste de normalidade para confirmar o caso. Usando o pacote tseries, a função jarque.bera.test() usa o teste de Bera-Jarque com a hipotese nula de que os residuos tem distribuição normal, e como o p-value de nosso teste de 0.002362 < 0.05, rejeitamos esta hipotese.
 
+```{r}
+library(tseries)
+jarque.bera.test(residuals(model))
+```
 
+## Conclusão
 
+Neste Relatório abordei inicialmente uma análise descritiva e exploratória afimm de conhecer melhor o conjunto de dados que estava trabalhando. Em
+seguida falei um pouco da ideia do modelo de regressão que me veio a mente, além de alguns tópicos da análise de diagnóstico de nosso modelo, como
+Observações atípicas, Normalidade e Homocedasticidade.
+
+A principio pensei em fazer um modelo de séries temporais por causa variável Data, do banco de dados, para prever como seria o consumo de cerveja alguns dias depois. Mas um modelo de regressão linear seria perfeito para prever esse mesmo consumo de acordo com a temperatura da cidade.
+
+Na análise de diagnostico tivemos alguns problemas. Vimos na análise descritiva que existiam alguns possivel outliers, que foi confirmado a presença dele no gráfico da Distância de Cook, além da distribuição dos nosso resíduos não serem normalmente distribuidos, nos demais gráficos nosso modelo parece apresentavel.
+
+Portanto, apresentando um coeficiente de determinação não muito alto, e pela falha na normalização dos resíduos, esse modelo não é valido. Podendo ser resolvido com alguma transformação de normalidade, ou testando outros modelos.
 
 
 
